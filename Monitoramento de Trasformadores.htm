@@ -1,0 +1,600 @@
+Put your HTML text here<!doctype html>
+<html lang="pt">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Monitor de Transformadores – Rede Moçambicana</title>
+  <!-- TailwindCSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Chart.js + Luxon (escala temporal) -->
+  <script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"></script>
+  <!-- Ícones Lucide -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    /* Scroll suave e ajuste de fonte para números */
+    html { scroll-behavior: smooth; }
+    .tab-active { border-bottom-width: 2px; }
+    .mono { font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+  <!-- Navbar -->
+  <header class="sticky top-0 z-40 backdrop-blur bg-white/80 border-b border-slate-200">
+    <div class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-xl bg-sky-600 flex items-center justify-center text-white font-semibold">EDM</div>
+          <div>
+            <h1 class="text-lg font-semibold">Monitor de Transformadores</h1>
+            <p class="text-xs text-slate-500">Rede elétrica moçambicana · 50 Hz</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <label class="text-xs text-slate-600">Modo</label>
+          <select id="modeSelect" class="text-sm border border-slate-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-500">
+            <option value="simulado" selected>Simulado</option>
+            <option value="api">API</option>
+          </select>
+          <input id="apiUrl" type="text" placeholder="wss://exemplo.sua.api/realtime"
+                 class="hidden text-sm border border-slate-300 rounded-lg px-2 py-1 w-72 focus:outline-none focus:ring-2 focus:ring-sky-500" />
+          <button id="connectBtn" class="hidden inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-sky-600 text-white text-sm hover:bg-sky-700">
+            <i data-lucide="plug"></i><span>Conectar</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Conteúdo -->
+  <main class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-6">
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+      <!-- Sidebar: lista de transformadores -->
+      <aside class="lg:col-span-1">
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200">
+          <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+            <h2 class="font-semibold">Transformadores</h2>
+            <button id="addTfBtn" title="Adicionar (demo)" class="p-2 rounded-lg hover:bg-slate-100">
+              <i data-lucide="plus"></i>
+            </button>
+          </div>
+          <div id="tfList" class="divide-y divide-slate-100 max-h-[70vh] overflow-auto">
+            <!-- Preenchido por JS -->
+          </div>
+        </div>
+      </aside>
+
+      <!-- Área principal -->
+      <section class="lg:col-span-3">
+        <!-- Tabs -->
+        <div class="mb-4 flex items-center gap-2 text-sm">
+          <button data-route="#/dashboard" class="route-tab px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 tab-active">Dashboard</button>
+          <button data-route="#/detalhes" class="route-tab px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50">Detalhes</button>
+          <button data-route="#/alertas" class="route-tab px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50">Alertas</button>
+        </div>
+
+        <!-- DASHBOARD -->
+        <div id="view-dashboard" class="space-y-6">
+          <!-- KPIs -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div class="bg-white rounded-2xl border border-slate-200 p-4">
+              <div class="text-xs text-slate-500">Carga total (MW)</div>
+              <div id="kpiTotalMW" class="text-2xl font-semibold mono">0.0</div>
+            </div>
+            <div class="bg-white rounded-2xl border border-slate-200 p-4">
+              <div class="text-xs text-slate-500">Mvar total</div>
+              <div id="kpiTotalMvar" class="text-2xl font-semibold mono">0.0</div>
+            </div>
+            <div class="bg-white rounded-2xl border border-slate-200 p-4">
+              <div class="text-xs text-slate-500">Fator de potência médio</div>
+              <div id="kpiPF" class="text-2xl font-semibold mono">0.00</div>
+            </div>
+            <div class="bg-white rounded-2xl border border-slate-200 p-4">
+              <div class="text-xs text-slate-500">Alertas ativos</div>
+              <div id="kpiAlerts" class="text-2xl font-semibold mono">0</div>
+            </div>
+          </div>
+
+          <!-- Gráficos -->
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div class="bg-white rounded-2xl border border-slate-200 p-4">
+              <div class="flex items-center justify-between mb-2">
+                <h3 class="font-semibold">Potência total (MW) — 60 min</h3>
+                <div class="text-xs text-slate-500" id="dashMWmeta"></div>
+              </div>
+              <canvas id="chartTotalMW" height="140"></canvas>
+            </div>
+            <div class="bg-white rounded-2xl border border-slate-200 p-4">
+              <div class="flex items-center justify-between mb-2">
+                <h3 class="font-semibold">Tensão média (kV) — 60 min</h3>
+                <div class="text-xs text-slate-500" id="dashVmeta"></div>
+              </div>
+              <canvas id="chartAvgV" height="140"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- DETALHES -->
+        <div id="view-detalhes" class="hidden space-y-6">
+          <div class="bg-white rounded-2xl border border-slate-200 p-4">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 id="detTitle" class="font-semibold">Selecionar um transformador</h3>
+                <p id="detSubtitle" class="text-xs text-slate-500">Subestação · Tensão nominal · Potência nominal</p>
+              </div>
+              <div class="flex items-center gap-2 text-xs">
+                <span class="px-2 py-1 rounded-lg bg-slate-100" id="detStatus">—</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <!-- Indicadores -->
+            <div class="lg:col-span-1 grid grid-cols-2 gap-4">
+              <div class="bg-white rounded-2xl border border-slate-200 p-4">
+                <div class="text-xs text-slate-500">P Ativa (MW)</div>
+                <div id="detP" class="text-2xl font-semibold mono">—</div>
+              </div>
+              <div class="bg-white rounded-2xl border border-slate-200 p-4">
+                <div class="text-xs text-slate-500">Q Reativa (Mvar)</div>
+                <div id="detQ" class="text-2xl font-semibold mono">—</div>
+              </div>
+              <div class="bg-white rounded-2xl border border-slate-200 p-4">
+                <div class="text-xs text-slate-500">V (kV)</div>
+                <div id="detV" class="text-2xl font-semibold mono">—</div>
+              </div>
+              <div class="bg-white rounded-2xl border border-slate-200 p-4">
+                <div class="text-xs text-slate-500">I (kA)</div>
+                <div id="detI" class="text-2xl font-semibold mono">—</div>
+              </div>
+              <div class="bg-white rounded-2xl border border-slate-200 p-4">
+                <div class="text-xs text-slate-500">Fator de Potência</div>
+                <div id="detPF" class="text-2xl font-semibold mono">—</div>
+              </div>
+              <div class="bg-white rounded-2xl border border-slate-200 p-4">
+                <div class="text-xs text-slate-500">Frequência (Hz)</div>
+                <div id="detF" class="text-2xl font-semibold mono">—</div>
+              </div>
+            </div>
+
+            <!-- Gráficos -->
+            <div class="lg:col-span-2 grid grid-cols-1 gap-4">
+              <div class="bg-white rounded-2xl border border-slate-200 p-4">
+                <div class="flex items-center justify-between mb-2">
+                  <h4 class="font-semibold">P (MW) — 60 min</h4>
+                  <span class="text-xs text-slate-500" id="detPmeta"></span>
+                </div>
+                <canvas id="chartDetP" height="120"></canvas>
+              </div>
+              <div class="bg-white rounded-2xl border border-slate-200 p-4">
+                <div class="flex items-center justify-between mb-2">
+                  <h4 class="font-semibold">V (kV) — 60 min</h4>
+                  <span class="text-xs text-slate-500" id="detVmeta"></span>
+                </div>
+                <canvas id="chartDetV" height="120"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ALERTAS -->
+        <div id="view-alertas" class="hidden space-y-4">
+          <div class="bg-white rounded-2xl border border-slate-200 p-4">
+            <div class="flex items-center justify-between">
+              <h3 class="font-semibold">Alertas</h3>
+              <div class="flex items-center gap-2">
+                <button id="exportCsv" class="px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-sm">Exportar CSV</button>
+                <button id="clearAlerts" class="px-3 py-2 rounded-xl bg-rose-600 text-white hover:bg-rose-700 text-sm">Limpar</button>
+              </div>
+            </div>
+          </div>
+          <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+            <table class="min-w-full text-sm">
+              <thead class="bg-slate-50 text-slate-600">
+                <tr>
+                  <th class="text-left px-4 py-2">Hora</th>
+                  <th class="text-left px-4 py-2">ID</th>
+                  <th class="text-left px-4 py-2">Subestação</th>
+                  <th class="text-left px-4 py-2">Tipo</th>
+                  <th class="text-left px-4 py-2">Valor</th>
+                  <th class="text-left px-4 py-2">Limite</th>
+                  <th class="text-left px-4 py-2">Detalhe</th>
+                </tr>
+              </thead>
+              <tbody id="alertsBody" class="divide-y divide-slate-100">
+                <!-- Linhas via JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    // ====== Configuração e Modelo de Dados ======
+    const TICK_MS = 2000; // período de atualização (simulado)
+    const HISTORY_MINUTES = 60; // janela gráfica (min)
+
+    // Transformadores de exemplo (edite para refletir sua rede)
+    const transformers = [
+      { id: 'T1', name: 'T1', substation: 'Maputo', kv: 66, mva: 40, enabled: true },
+      { id: 'T2', name: 'T2', substation: 'Matola', kv: 110, mva: 63, enabled: true },
+      { id: 'T3', name: 'T3', substation: 'Xai-Xai', kv: 33, mva: 25, enabled: true },
+      { id: 'T4', name: 'T4', substation: 'Beira', kv: 66, mva: 40, enabled: true },
+    ];
+
+    // Limites (ajuste conforme critérios operacionais)
+    const limits = {
+      vPctLow: 0.9,   // -10%
+      vPctHigh: 1.1,  // +10%
+      pfMin: 0.9,     // FP mínimo
+      fLow: 49.5,     // Hz
+      fHigh: 50.5
+    };
+
+    // Estado dinâmico
+    const state = {
+      selectedTfId: null,
+      alerts: [],
+      series: {
+        totalMW: [],
+        avgV: []
+      },
+      tfSeries: {}, // por ID: { P:[], V:[] }
+    };
+
+    // Inicializar séries por transformador
+    transformers.forEach(tf => {
+      state.tfSeries[tf.id] = { P: [], V: [] };
+    });
+
+    // ====== Utilidades ======
+    function nowISO() { return new Date().toISOString(); }
+
+    function round(n, d=2) { const p = Math.pow(10, d); return Math.round(n * p) / p; }
+
+    function ratedCurrentKA(mva, kv) {
+      // I_rated = S / (sqrt(3) * V) => kA
+      const S = mva * 1e6; // VA
+      const V = kv * 1e3; // V
+      const I = S / (Math.sqrt(3) * V); // A
+      return I / 1e3; // kA
+    }
+
+    function clampHistory(arr, minutes = HISTORY_MINUTES) {
+      const cutoff = Date.now() - minutes * 60 * 1000;
+      while (arr.length && arr[0].x < cutoff) arr.shift();
+    }
+
+    function pushPoint(arr, y) {
+      arr.push({ x: Date.now(), y });
+      clampHistory(arr);
+    }
+
+    function csvEscape(s) { return String(s).replaceAll('"', '""'); }
+
+    // ====== Simulação (gera medidas plausíveis) ======
+    function simulateMeasurements(tf) {
+      // Base por tensão nominal
+      const baseV = tf.kv; // kV
+      // Carga base por MVA (60–80% típico)
+      const S_base = tf.mva * (0.6 + Math.random() * 0.2); // MVA
+      // Fator de potência alvo (0.90–0.99)
+      const pf_target = 0.90 + Math.random() * 0.09;
+      // Oscilações suaves
+      const flicker = 1 + (Math.random() - 0.5) * 0.04; // ±2%
+      const P = round(S_base * pf_target * flicker, 2); // MW (aprox)
+      const Qsign = Math.random() < 0.7 ? 1 : -1; // 70% indutivo (lag)
+      const Q = round(Math.sqrt(Math.max(S_base**2 - (P**2), 0)) * Qsign, 2); // Mvar
+      const V = round(baseV * (0.97 + Math.random() * 0.06), 2); // 97–103% nominal
+      const S = Math.sqrt(P**2 + Q**2);
+      const pf = S > 0 ? round(P / S, 3) : 1.0;
+      const I = round((S * 1e6) / (Math.sqrt(3) * (V * 1e3)) / 1e3, 3); // kA
+      const f = round(50 + (Math.random() - 0.5) * 0.1, 2); // 49.95–50.05
+      return { P, Q, V, I, pf, f };
+    }
+
+    // ====== Alertas ======
+    function checkAlerts(tf, m) {
+      const irated = ratedCurrentKA(tf.mva, tf.kv);
+      // Tensão
+      if (m.V < tf.kv * limits.vPctLow) addAlert(tf, 'Tensão baixa', `${m.V} kV`, `≥ ${round(tf.kv * limits.vPctLow,1)} kV`);
+      if (m.V > tf.kv * limits.vPctHigh) addAlert(tf, 'Tensão alta', `${m.V} kV`, `≤ ${round(tf.kv * limits.vPctHigh,1)} kV`);
+      // Corrente
+      if (m.I > irated) addAlert(tf, 'Sobrecorrente', `${m.I} kA`, `≤ ${round(irated,3)} kA`);
+      // Fator de potência
+      if (m.pf < limits.pfMin) addAlert(tf, 'FP baixo', `${m.pf}`, `≥ ${limits.pfMin}`);
+      // Frequência
+      if (m.f < limits.fLow || m.f > limits.fHigh) addAlert(tf, 'Frequência fora de faixa', `${m.f} Hz`, `${limits.fLow}–${limits.fHigh} Hz`);
+    }
+
+    function addAlert(tf, tipo, valor, limite) {
+      const row = {
+        ts: new Date(),
+        id: tf.id,
+        sub: tf.substation,
+        tipo,
+        valor,
+        limite,
+        detalhe: `${tf.kv} kV / ${tf.mva} MVA`
+      };
+      state.alerts.unshift(row);
+      renderAlerts();
+      updateKPIs();
+    }
+
+    // ====== Renderização ======
+    function renderTfList() {
+      const cont = document.getElementById('tfList');
+      cont.innerHTML = '';
+      transformers.forEach(tf => {
+        const ir = ratedCurrentKA(tf.mva, tf.kv);
+        const li = document.createElement('button');
+        li.className = 'w-full text-left px-4 py-3 hover:bg-slate-50 flex items-center justify-between';
+        li.innerHTML = `
+          <div>
+            <div class="font-medium">${tf.id} · ${tf.substation}</div>
+            <div class="text-xs text-slate-500">${tf.kv} kV · ${tf.mva} MVA · I<sub>nom</sub> ${round(ir,3)} kA</div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="inline-flex items-center text-xs px-2 py-1 rounded-lg ${tf.enabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}">${tf.enabled ? 'Ativo' : 'Off'}</span>
+            <i data-lucide="chevron-right" class="w-4 h-4 text-slate-400"></i>
+          </div>`;
+        li.addEventListener('click', () => selectTf(tf.id));
+        cont.appendChild(li);
+      });
+      lucide.createIcons();
+    }
+
+    function renderAlerts() {
+      const tbody = document.getElementById('alertsBody');
+      tbody.innerHTML = '';
+      state.alerts.forEach(a => {
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-rose-50/50';
+        const fmt = a.ts.toLocaleString();
+        tr.innerHTML = `
+          <td class="px-4 py-2 whitespace-nowrap">${fmt}</td>
+          <td class="px-4 py-2">${a.id}</td>
+          <td class="px-4 py-2">${a.sub}</td>
+          <td class="px-4 py-2">${a.tipo}</td>
+          <td class="px-4 py-2 mono">${a.valor}</td>
+          <td class="px-4 py-2 mono">${a.limite}</td>
+          <td class="px-4 py-2 text-slate-500">${a.detalhe}</td>`;
+        tbody.appendChild(tr);
+      });
+      document.getElementById('kpiAlerts').textContent = state.alerts.length;
+    }
+
+    function updateKPIs() {
+      // Totais correntes (último ponto por TF)
+      let sumP = 0, sumQ = 0, sumV = 0, count = 0;
+      transformers.forEach(tf => {
+        const s = state.lastMeasures?.[tf.id];
+        if (s) {
+          sumP += s.P; sumQ += s.Q; sumV += s.V; count += 1;
+        }
+      });
+      const pf = (sumP === 0 && sumQ === 0) ? 1 : sumP / Math.sqrt(sumP*sumP + sumQ*sumQ);
+      document.getElementById('kpiTotalMW').textContent = round(sumP,2);
+      document.getElementById('kpiTotalMvar').textContent = round(sumQ,2);
+      document.getElementById('kpiPF').textContent = round(pf,2);
+      document.getElementById('kpiAlerts').textContent = state.alerts.length;
+    }
+
+    // ====== Navegação (SPA simples) ======
+    function setRoute(hash) {
+      document.querySelectorAll('.route-tab').forEach(btn => {
+        btn.classList.toggle('tab-active', btn.dataset.route === hash);
+      });
+      const views = {
+        '#/dashboard': 'view-dashboard',
+        '#/detalhes': 'view-detalhes',
+        '#/alertas': 'view-alertas'
+      };
+      Object.values(views).forEach(id => document.getElementById(id).classList.add('hidden'));
+      const v = views[hash] || 'view-dashboard';
+      document.getElementById(v).classList.remove('hidden');
+      location.hash = hash;
+    }
+
+    document.querySelectorAll('.route-tab').forEach(btn => {
+      btn.addEventListener('click', () => setRoute(btn.dataset.route));
+    });
+
+    // ====== Gráficos ======
+    let chartTotalMW, chartAvgV, chartDetP, chartDetV;
+
+    function makeLineChart(ctx, label, unit) {
+      return new Chart(ctx, {
+        type: 'line',
+        data: { datasets: [{ label, data: [], borderWidth: 2, tension: 0.25, pointRadius: 0 }] },
+        options: {
+          animation: false,
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: { type: 'time', time: { unit: 'minute', tooltipFormat: 'HH:mm:ss' }, grid: { display: false } },
+            y: { beginAtZero: false, ticks: { callback: (v) => `${v} ${unit}` } }
+          },
+          plugins: { legend: { display: false } }
+        }
+      });
+    }
+
+    function initCharts() {
+      chartTotalMW = makeLineChart(document.getElementById('chartTotalMW'), 'MW', 'MW');
+      chartAvgV   = makeLineChart(document.getElementById('chartAvgV'),   'kV', 'kV');
+      chartDetP   = makeLineChart(document.getElementById('chartDetP'),   'MW', 'MW');
+      chartDetV   = makeLineChart(document.getElementById('chartDetV'),   'kV', 'kV');
+      document.getElementById('dashMWmeta').textContent = 'Soma dos Txs';
+      document.getElementById('dashVmeta').textContent = 'Média dos Txs';
+    }
+
+    function refreshDashCharts() {
+      chartTotalMW.data.datasets[0].data = state.series.totalMW;
+      chartTotalMW.update();
+      chartAvgV.data.datasets[0].data = state.series.avgV;
+      chartAvgV.update();
+    }
+
+    function refreshDetailCharts(tfId) {
+      chartDetP.data.datasets[0].data = state.tfSeries[tfId].P;
+      chartDetP.update();
+      chartDetV.data.datasets[0].data = state.tfSeries[tfId].V;
+      chartDetV.update();
+    }
+
+    function selectTf(tfId) {
+      state.selectedTfId = tfId;
+      const tf = transformers.find(t => t.id === tfId);
+      document.getElementById('detTitle').textContent = `${tf.id} · ${tf.substation}`;
+      document.getElementById('detSubtitle').textContent = `${tf.kv} kV · ${tf.mva} MVA`;
+      document.getElementById('detStatus').textContent = 'Monitorando';
+      setRoute('#/detalhes');
+      refreshDetailCharts(tfId);
+    }
+
+    // ====== Ciclo de atualização ======
+    state.lastMeasures = {}; // por ID
+
+    function tickSimulated() {
+      let totalP = 0; let totalV = 0; let count = 0;
+      transformers.forEach(tf => {
+        if (!tf.enabled) return;
+        const m = simulateMeasurements(tf);
+        state.lastMeasures[tf.id] = m;
+        totalP += m.P; totalV += m.V; count += 1;
+        // push séries individuais
+        pushPoint(state.tfSeries[tf.id].P, m.P);
+        pushPoint(state.tfSeries[tf.id].V, m.V);
+        // alertas
+        checkAlerts(tf, m);
+        // detalhes (se selecionado)
+        if (state.selectedTfId === tf.id) updateDetailsPanel(tf, m);
+      });
+      // dashboard séries
+      if (count > 0) {
+        pushPoint(state.series.totalMW, round(totalP,2));
+        pushPoint(state.series.avgV, round(totalV / count, 2));
+      }
+      refreshDashCharts();
+      updateKPIs();
+    }
+
+    function updateDetailsPanel(tf, m) {
+      document.getElementById('detP').textContent = m.P;
+      document.getElementById('detQ').textContent = m.Q;
+      document.getElementById('detV').textContent = m.V;
+      document.getElementById('detI').textContent = m.I;
+      document.getElementById('detPF').textContent = m.pf;
+      document.getElementById('detF').textContent = m.f;
+      document.getElementById('detPmeta').textContent = `${tf.mva} MVA · FP≥${limits.pfMin}`;
+      document.getElementById('detVmeta').textContent = `${round(tf.kv*limits.vPctLow,1)}–${round(tf.kv*limits.vPctHigh,1)} kV`;
+    }
+
+    // ====== Integração API (WebSocket) ======
+    let ws = null;
+    function setupModeUI(mode) {
+      const urlInput = document.getElementById('apiUrl');
+      const btn = document.getElementById('connectBtn');
+      if (mode === 'api') {
+        urlInput.classList.remove('hidden');
+        btn.classList.remove('hidden');
+      } else {
+        urlInput.classList.add('hidden');
+        btn.classList.add('hidden');
+        if (ws) { ws.close(); ws = null; }
+      }
+    }
+
+    document.getElementById('modeSelect').addEventListener('change', (e) => {
+      setupModeUI(e.target.value);
+    });
+
+    document.getElementById('connectBtn').addEventListener('click', () => {
+      const url = document.getElementById('apiUrl').value.trim();
+      if (!url) return alert('Informe a URL WebSocket (wss://...) da sua API de medição.');
+      tryConnectWS(url);
+    });
+
+    function tryConnectWS(url) {
+      if (ws) ws.close();
+      ws = new WebSocket(url);
+      ws.onopen = () => console.log('WS conectado');
+      ws.onclose = () => console.log('WS fechado');
+      ws.onerror = (e) => console.error('WS erro', e);
+      ws.onmessage = (ev) => {
+        // Espera-se mensagens JSON por medição no formato:
+        // { id:"T1", P:MW, Q:Mvar, V:kV, I:kA, pf:0..1, f:Hz, ts:epoch_ms }
+        try {
+          const msg = JSON.parse(ev.data);
+          const tf = transformers.find(t => t.id === msg.id);
+          if (!tf) return;
+          const m = {
+            P: Number(msg.P), Q: Number(msg.Q), V: Number(msg.V), I: Number(msg.I), pf: Number(msg.pf), f: Number(msg.f)
+          };
+          state.lastMeasures[tf.id] = m;
+          pushPoint(state.tfSeries[tf.id].P, m.P);
+          pushPoint(state.tfSeries[tf.id].V, m.V);
+          checkAlerts(tf, m);
+          if (state.selectedTfId === tf.id) updateDetailsPanel(tf, m);
+          // Recalcular agregados rápido
+          let totalP = 0, totalV = 0, count = 0;
+          transformers.forEach(t => { const s = state.lastMeasures[t.id]; if (s) { totalP += s.P; totalV += s.V; count++; }});
+          if (count>0) { pushPoint(state.series.totalMW, round(totalP,2)); pushPoint(state.series.avgV, round(totalV/count,2)); }
+          refreshDashCharts();
+          updateKPIs();
+        } catch (err) {
+          console.error('Mensagem inválida', err);
+        }
+      };
+    }
+
+    // ====== Exportação CSV de alertas ======
+    function exportAlertsCSV() {
+      const header = ['hora','id','subestacao','tipo','valor','limite','detalhe'];
+      const rows = state.alerts.map(a => [a.ts.toISOString(), a.id, a.sub, a.tipo, a.valor, a.limite, a.detalhe]);
+      const csv = [header, ...rows].map(r => r.map(csvEscape).map(s => `"${s}"`).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'alertas_transformadores.csv'; a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    // ====== Bootstrap da App ======
+    function init() {
+      lucide.createIcons();
+      renderTfList();
+      initCharts();
+      setRoute('#/dashboard');
+      // Simulação periódica
+      setInterval(() => {
+        const mode = document.getElementById('modeSelect').value;
+        if (mode === 'simulado') tickSimulated();
+      }, TICK_MS);
+      // Controles
+      document.getElementById('clearAlerts').addEventListener('click', () => { state.alerts = []; renderAlerts(); });
+      document.getElementById('exportCsv').addEventListener('click', exportAlertsCSV);
+      document.getElementById('addTfBtn').addEventListener('click', () => {
+        // Adiciona um transformador demo
+        const idx = transformers.length + 1;
+        const kvs = [33, 66, 110, 132, 220];
+        const tf = { id: `T${idx}`, name: `T${idx}`, substation: `SUB-${idx}`, kv: kvs[Math.floor(Math.random()*kvs.length)], mva: [25,40,63,90][Math.floor(Math.random()*4)], enabled: true };
+        transformers.push(tf);
+        state.tfSeries[tf.id] = { P: [], V: [] };
+        renderTfList();
+      });
+      // Se já houver TFs, seleciona o primeiro na aba Detalhes ao trocar
+      document.querySelector('[data-route="#/detalhes"]').addEventListener('click', () => {
+        if (!state.selectedTfId && transformers.length) selectTf(transformers[0].id);
+      });
+    }
+
+    window.addEventListener('load', init);
+  </script>
+</body>
+</html>
